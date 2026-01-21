@@ -27,7 +27,7 @@ import pyrosetta.distributed
 from datetime import datetime
 from functools import wraps
 from pyrosetta.distributed.cluster.config import __dask_version__
-from pyrosetta.distributed.cluster.converters import _parse_protocols
+from pyrosetta.distributed.cluster.converters import _parse_protocols, _version_tuple_to_str
 from pyrosetta.distributed.cluster.initialization import (
     _get_norm_task_options,
     _get_residue_type_set_name3 as _get_residue_type_set,
@@ -38,6 +38,7 @@ from pyrosetta.distributed.cluster.validators import (
     _validate_priorities,
     _validate_protocols_seeds_decoy_ids,
     _validate_resources,
+    _validate_retries,
 )
 from pyrosetta.distributed.packed_pose.core import PackedPose
 from typing import (
@@ -147,19 +148,71 @@ class TaskBase(Generic[G]):
             _protocols_index = len(priorities) - len(protocols)
             return priorities[_protocols_index]
 
+    def _get_retry(
+            self, retries: Optional[Union[int, List[int], Tuple[int, ...]]], protocols: List[Callable[..., Any]]
+        ) -> Optional[int]:
+        """Return the number of task retries for the current protocol."""
+        if retries is None:
+            return None
+        elif isinstance(retries, int):
+            return retries
+        else:
+            _protocols_index = len(retries) - len(protocols)
+            return retries[_protocols_index]
+
+    def _parse_resources(self, resources: Any) -> Any:
+        """Parse the resources keyword argument parameter."""
+        _dask_version_threshold = (2, 1, 0)
+        if __dask_version__ < _dask_version_threshold:
+            if resources is not None:
+                _dask_version_str = _version_tuple_to_str(__dask_version__)
+                _dask_version_threshold_str = _version_tuple_to_str(_dask_version_threshold)
+                logging.warning(
+                    "Use of the `resources` keyword argument is not supported for 'dask' and 'distributed' "
+                    f"package versions <{_dask_version_threshold_str}\nCurrent dask version: {_dask_version_str}\n"
+                    "Please set `PyRosettaCluster().distribute(resources=None)`, or upgrade the 'dask' and 'distributed' "
+                    f"package versions to >={_dask_version_threshold_str} to silence this warning. "
+                    "Automatically disabling resource constraints..."
+                )
+            return None
+        else:
+            return resources
+
     def _parse_priorities(self, priorities: Any) -> Any:
-        """Parse the priorities keyword argument."""
-        if __dask_version__ < (1, 21, 0):
-            _dask_version_str = ".".join(map(str, __dask_version__))
-            logging.warning(
-                "Use of the `priorities` keyword argument is not supported for 'dask' and 'distributed' "
-                f"package versions <1.21.0\nCurrent dask version: {_dask_version_str}\n"
-                "Please set `PyRosettaCluster().distribute(priority=None)`, or upgrade the 'dask' and 'distributed' "
-                "package versions to >=1.21.0 to silence this warning. Automatically disabling priorities..."
-            )
+        """Parse the priorities keyword argument parameter."""
+        _dask_version_threshold = (1, 21, 0)
+        if __dask_version__ < _dask_version_threshold:
+            if priorities is not None:
+                _dask_version_str = _version_tuple_to_str(__dask_version__)
+                _dask_version_threshold_str = _version_tuple_to_str(_dask_version_threshold)
+                logging.warning(
+                    "Use of the `priorities` keyword argument is not supported for 'dask' and 'distributed' "
+                    f"package versions <{_dask_version_threshold_str}\nCurrent dask version: {_dask_version_str}\n"
+                    "Please set `PyRosettaCluster().distribute(priorities=None)`, or upgrade the 'dask' and 'distributed' "
+                    f"package versions to >={_dask_version_threshold_str} to silence this warning. "
+                    "Automatically disabling priorities..."
+                )
             return None
         else:
             return priorities
+
+    def _parse_retries(self, retries: Any) -> Any:
+        """Parse the retries keyword argument parameter."""
+        _dask_version_threshold = (1, 20, 0)
+        if __dask_version__ < _dask_version_threshold:
+            if retries is not None:
+                _dask_version_str = _version_tuple_to_str(__dask_version__)
+                _dask_version_threshold_str = _version_tuple_to_str(_dask_version_threshold)
+                logging.warning(
+                    "Use of the `retries` keyword argument is not supported for 'dask' and 'distributed' "
+                    f"package versions <{_dask_version_threshold_str}\nCurrent dask version: {_dask_version_str}\n"
+                    "Please set `PyRosettaCluster().distribute(retries=None)`, or upgrade the 'dask' and 'distributed' "
+                    f"package versions to >={_dask_version_threshold_str} to silence this warning. "
+                    "Automatically disabling task retries..."
+                )
+            return None
+        else:
+            return retries
 
     def _setup_kwargs(
         self,
@@ -167,18 +220,20 @@ class TaskBase(Generic[G]):
         clients_indices: List[int],
         resources: Optional[Union[List[Dict[Any, Any]], Tuple[Dict[Any, Any], ...]]],
         priorities: Optional[Union[List[int], Tuple[int, ...]]],
-    ) -> Tuple[bytes, Dict[str, Any], Callable[..., Any], int, Optional[Dict[Any, Any]], Optional[int]]:
+        retries: Optional[Union[int, List[int], Tuple[int, ...]]],
+    ) -> Tuple[bytes, Dict[str, Any], Callable[..., Any], int, Optional[Dict[Any, Any]], Optional[int], Optional[int]]:
         """Setup the kwargs for the subsequent tasks."""
         clients_index = self._get_clients_index(clients_indices, kwargs[self.protocols_key])
         resource = self._get_resource(resources, kwargs[self.protocols_key])
         priority = self._get_priority(priorities, kwargs[self.protocols_key])
+        retry = self._get_retry(retries, kwargs[self.protocols_key])
         _protocols, protocol, seed = self._get_task_state(kwargs[self.protocols_key])
         kwargs[self.protocols_key] = _protocols
         kwargs = self._setup_seed(kwargs, seed)
         pyrosetta_init_kwargs = self._setup_pyrosetta_init_kwargs(kwargs)
         compressed_kwargs = self.serializer.compress_kwargs(kwargs)
 
-        return compressed_kwargs, pyrosetta_init_kwargs, protocol, clients_index, resource, priority
+        return compressed_kwargs, pyrosetta_init_kwargs, protocol, clients_index, resource, priority, retry
 
     def _setup_seed(self, kwargs: Dict[Any, Any], seed: Optional[str]) -> Dict[Any, Any]:
         """
@@ -207,8 +262,8 @@ class TaskBase(Generic[G]):
         return kwargs
 
     def _setup_protocols_protocol_seed(
-        self, args: Tuple[Any, ...], protocols: Any, clients_indices: Any, resources: Any, priorities: Any
-    ) -> Tuple[List[Callable[..., Any]], Callable[..., Any], Optional[str], int, Optional[Dict[Any, Any]], Optional[int]]:
+        self, args: Tuple[Any, ...], protocols: Any, clients_indices: Any, resources: Any, priorities: Any, retries: Any
+    ) -> Tuple[List[Callable[..., Any]], Callable[..., Any], Optional[str], int, Optional[Dict[Any, Any]], Optional[int], Optional[int]]:
         """Parse, validate, and setup the user-provided PyRosetta protocol(s)."""
 
         _protocols = _parse_protocols(args) + _parse_protocols(protocols)
@@ -216,14 +271,16 @@ class TaskBase(Generic[G]):
         _validate_clients_indices(clients_indices, _protocols, _clients_dict_keys)
         _validate_resources(resources, _protocols)
         _validate_priorities(priorities, _protocols)
+        _validate_retries(retries, _protocols)
         _clients_index = self._get_clients_index(clients_indices, _protocols)
         _resource = self._get_resource(resources, _protocols)
         _priority = self._get_priority(priorities, _protocols)
+        _retry = self._get_retry(retries, _protocols)
         _protocols, _protocol, _seed = self._get_task_state(
             _validate_protocols_seeds_decoy_ids(_protocols, self.seeds, self.decoy_ids)
         )
 
-        return _protocols, _protocol, _seed, _clients_index, _resource, _priority
+        return _protocols, _protocol, _seed, _clients_index, _resource, _priority, _retry
 
 
 def capture_task_metadata(func: M) -> M:

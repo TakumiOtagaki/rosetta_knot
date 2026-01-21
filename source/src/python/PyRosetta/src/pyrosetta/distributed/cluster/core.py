@@ -908,6 +908,7 @@ class PyRosettaCluster(IO[G], LoggingSupport[G], SchedulerManager[G], SecurityIO
         passkey: bytes,
         resource: Optional[Dict[Any, Any]],
         priority: Optional[int],
+        retry: Optional[int],
     ) -> Future:
         """Scatter data and return submitted 'user_spawn_thread' future."""
         task_id = uuid.uuid4().hex
@@ -927,10 +928,21 @@ class PyRosettaCluster(IO[G], LoggingSupport[G], SchedulerManager[G], SecurityIO
             broadcast=False,
             hash=False,
         )
-        if priority is None: # Use default priority in distributed versions >=1.21.0
-            return client.submit(user_spawn_thread, *scatter, pure=False, resources=resource)
-        else:
-            return client.submit(user_spawn_thread, *scatter, pure=False, resources=resource, priority=priority)
+        submit_kwargs = {"pure": False}
+        # Omit resources keyword argument for distributed versions <2.1.0
+        # or use default if user specifies `resources=None` in distributed versions >=2.1.0
+        if resource is not None:
+            submit_kwargs["resources"] = resource
+        # Omit priority keyword argument for distributed versions <1.21.0
+        # or use default if user specifies `priorities=None` in distributed versions >=1.21.0
+        if priority is not None:
+            submit_kwargs["priority"] = priority
+        # Omit retries keyword argument for distributed versions <1.20.0
+        # or use default if user specifies `retries=None` for distributed versions >=1.20.0
+        if retry is not None:
+            submit_kwargs["retries"] = retry
+
+        return client.submit(user_spawn_thread, *scatter, **submit_kwargs)
 
     def _run(
         self,
@@ -939,6 +951,7 @@ class PyRosettaCluster(IO[G], LoggingSupport[G], SchedulerManager[G], SecurityIO
         clients_indices: Any = None,
         resources: Any = None,
         priorities: Any = None,
+        retries: Any = None,
     ) -> Union[NoReturn, Generator[Tuple[PackedPose, Dict[Any, Any]], None, None]]:
         """
         Run user-provided PyRosetta protocols on a local or remote compute cluster using
@@ -986,10 +999,16 @@ class PyRosettaCluster(IO[G], LoggingSupport[G], SchedulerManager[G], SecurityIO
                 resources=[{"GPU": 2}, {"MEMORY": 100e9}],
             )
 
-            # Run protocols with depth-first task execution
+            # Run protocols with depth-first task execution:
             PyRosettaCluster().distribute(
                 protocols=[protocol_1, protocol_2, protocol_3, protocol_4],
                 priorities=[0, 10, 20, 30],
+            )
+
+            # Run protocols with up to three retries per failed task during `protocol_3` and `protocol_4`:
+            PyRosettaCluster().distribute(
+                protocols=[protocol_1, protocol_2, protocol_3, protocol_4],
+                retries=[0, 0, 3, 3],
             )
 
         Args:
@@ -1041,15 +1060,34 @@ class PyRosettaCluster(IO[G], LoggingSupport[G], SchedulerManager[G], SecurityIO
                     protocols when dask worker resources are saturated.
                 See https://distributed.dask.org/en/stable/priority.html for more information.
                 Default: None
+            retries: An optional `list` or `tuple` of `int` objects, where each `int` object (≥0) sets the number of allowed
+                automatic retries of each failed task that was submitted to the corresponding user-provided PyRosetta protocol
+                (i.e., indexed the same as `client_indices`). If an `int` object (≥0) is provided, then apply that number of
+                allowed automatic retries to all user-provided PyRosetta protocols. If `None`, then no explicit retries are
+                allowed. If not `None` and not an `int` object, then the length of the `retries` parameter must equal the number
+                of protocols passed to the `PyRosettaCluster().distribute` method, and each `int` value determines the number
+                of automatic retries the dask scheduler allows for that protocol's failed tasks. Allowing retries of failed tasks
+                may be useful if remote compute resources are subject to preemption (e.g., cloud spot instances or backfill
+                queues). Note that retries are only appropriate for user-provided PyRosetta protocols that are side effect-free
+                upon preemption, in which tasks can be restarted without producing inconsistent external states if preempted midway
+                through the protocol. Also note that if `PyRosettaCluster(ignore_errors=True)` is used, then protocols failing due
+                to standard Python exceptions or Rosetta segmentation faults will still be considered successes, and this
+                keyword argument parameter has no effect on them since these protocol errors are ignored. However, if a compute
+                resource executing tasks is reclaimed midway through a protocol, then the dask scheduler registers those tasks
+                as incomplete, and they may be retried a certain number of times based on this keyword argument parameter.
+                See https://distributed.dask.org/en/latest/scheduling-state.html#task-state for more information.
+                Default: None
         """
         yield_results = _parse_yield_results(self.yield_results)
         clients, cluster, adaptive = self._setup_clients_cluster_adaptive()
         self._setup_task_security_plugin(clients)
         socket_listener_address, passkey = self._setup_socket_listener(clients)
         compressed_input_packed_pose = self.serializer.compress_packed_pose(self.input_packed_pose)
+        resources = self._parse_resources(resources)
         priorities = self._parse_priorities(priorities)
-        protocols, protocol, seed, clients_index, resource, priority = self._setup_protocols_protocol_seed(
-            args, protocols, clients_indices, resources, priorities
+        retries = self._parse_retries(retries)
+        protocols, protocol, seed, clients_index, resource, priority, retry = self._setup_protocols_protocol_seed(
+            args, protocols, clients_indices, resources, priorities, retries
         )
         protocol_name = protocol.__name__
         compressed_protocol = self.serializer.compress_object(protocol)
@@ -1082,6 +1120,7 @@ class PyRosettaCluster(IO[G], LoggingSupport[G], SchedulerManager[G], SecurityIO
                     passkey,
                     resource,
                     priority,
+                    retry,
                 )
                 for _ in range(self.nstruct)
                 for compressed_kwargs, pyrosetta_init_kwargs in (
@@ -1116,8 +1155,8 @@ class PyRosettaCluster(IO[G], LoggingSupport[G], SchedulerManager[G], SecurityIO
                         )
                     if self.filter_results and _is_empty(self.serializer.decompress_packed_pose(compressed_packed_pose)):
                         continue
-                    compressed_kwargs, pyrosetta_init_kwargs, protocol, clients_index, resource, priority = self._setup_kwargs(
-                        kwargs, clients_indices, resources, priorities
+                    compressed_kwargs, pyrosetta_init_kwargs, protocol, clients_index, resource, priority, retry = self._setup_kwargs(
+                        kwargs, clients_indices, resources, priorities, retries
                     )
                     protocol_name = protocol.__name__
                     compressed_protocol = self.serializer.compress_object(protocol)
@@ -1133,6 +1172,7 @@ class PyRosettaCluster(IO[G], LoggingSupport[G], SchedulerManager[G], SecurityIO
                             passkey,
                             resource,
                             priority,
+                            retry,
                         )
                     )
                     self.tasks_size += 1
@@ -1149,6 +1189,7 @@ class PyRosettaCluster(IO[G], LoggingSupport[G], SchedulerManager[G], SecurityIO
         clients_indices: Any = None,
         resources: Any = None,
         priorities: Any = None,
+        retries: Any = None,
     ) -> Union[NoReturn, Generator[Tuple[PackedPose, Dict[Any, Any]], None, None]]:
         if self.sha1 != "":
             logging.warning(
@@ -1165,6 +1206,7 @@ class PyRosettaCluster(IO[G], LoggingSupport[G], SchedulerManager[G], SecurityIO
             clients_indices=clients_indices,
             resources=resources,
             priorities=priorities,
+            retries=retries,
         ):
             yield result
 
@@ -1175,6 +1217,7 @@ class PyRosettaCluster(IO[G], LoggingSupport[G], SchedulerManager[G], SecurityIO
         clients_indices: Any = None,
         resources: Any = None,
         priorities: Any = None,
+        retries: Any = None,
     ) -> Optional[NoReturn]:
         self.yield_results = False
         for _ in self._run(
@@ -1183,6 +1226,7 @@ class PyRosettaCluster(IO[G], LoggingSupport[G], SchedulerManager[G], SecurityIO
             clients_indices=clients_indices,
             resources=resources,
             priorities=priorities,
+            retries=retries,
         ):
             pass
 
