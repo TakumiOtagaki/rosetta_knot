@@ -34,6 +34,7 @@
 #include <core/util/SwitchResidueTypeSet.hh>
 #include <core/kinematics/ShortestPathInFoldTree.hh>
 #include <core/pose/Pose.hh>
+#include <core/conformation/Residue.hh>
 #include <core/chemical/ChemicalManager.hh>
 #include <core/chemical/ResidueType.hh>
 #include <core/pose/rna/util.hh>
@@ -49,6 +50,8 @@
 
 #include <basic/Tracer.hh>
 #include <ctime>
+#include <cstdlib>
+#include <fstream>
 
 #include <core/pose/rna/BasePairStep.hh> // MANUAL IWYU
 #include <protocols/rna/denovo/output/RNA_FragmentMonteCarloOutputter.hh> // AUTO IWYU For RNA_FragmentMonteCarloOutputter
@@ -84,6 +87,77 @@ namespace protocols { namespace viewer {
 namespace protocols {
 namespace rna {
 namespace denovo {
+
+namespace {
+
+// Environment variable based control of knot observation logging
+bool knot_obs_enabled() {
+	const char *path = std::getenv( "ROSETTA_KNOT_OBS_LOG" );
+	return ( path != nullptr && path[0] != '\0' );
+}
+
+// Epsilon for determining whether a residue has moved
+double knot_obs_eps() {
+	const char *eps = std::getenv( "ROSETTA_KNOT_OBS_EPS" );
+	if ( eps == nullptr || eps[0] == '\0' ) return 1e-3;
+	return std::atof( eps );
+}
+
+// Stream for knot observation logging
+std::ofstream & knot_obs_stream() {
+	static std::ofstream ofs;
+	static bool initialized = false;
+	if ( !initialized ) {
+		const char *path = std::getenv( "ROSETTA_KNOT_OBS_LOG" );
+		if ( path != nullptr && path[0] != '\0' ) {
+			ofs.open( path, std::ios::out | std::ios::app );
+			if ( ofs.good() ) {
+				ofs << "round,iter,move_type,count,residues\n";
+			}
+		}
+		initialized = true;
+	}
+	return ofs;
+}
+
+// Get a representative point for a residue (for movement comparison)
+core::Vector get_residue_point( core::pose::Pose const & pose, core::Size const i ) {
+	auto const & rsd = pose.residue( i );
+	if ( rsd.has( "C4'" ) ) return rsd.xyz( "C4'" );
+	if ( rsd.has( "C1'" ) ) return rsd.xyz( "C1'" );
+	return rsd.xyz( 1 );
+}
+
+// Log moved residues between two poses
+void log_moved_residues(
+	core::pose::Pose const & before,
+	core::pose::Pose const & after,
+	core::Size const round,
+	core::Size const iter,
+	std::string const & move_type
+) {
+	if ( !knot_obs_enabled() ) return;
+	if ( before.size() != after.size() ) return;
+	std::ofstream & ofs = knot_obs_stream();
+	if ( !ofs.good() ) return;
+
+	double const eps = knot_obs_eps();
+	utility::vector1< core::Size > moved;
+	moved.reserve( after.size() );
+	for ( core::Size i = 1; i <= after.size(); ++i ) {
+		core::Vector const a = get_residue_point( before, i );
+		core::Vector const b = get_residue_point( after, i );
+		if ( ( a - b ).length() > eps ) moved.push_back( i );
+	}
+	ofs << round << "," << iter << "," << move_type << "," << moved.size() << ",";
+	for ( core::Size k = 1; k <= moved.size(); ++k ) {
+		if ( k > 1 ) ofs << " ";
+		ofs << moved[ k ];
+	}
+	ofs << "\n";
+}
+
+} // namespace
 
 ////////////////////////////////////////////////////////////////////////////////////
 /// @details
@@ -294,7 +368,13 @@ RNA_FragmentMonteCarlo::apply( pose::Pose & pose ){
 			// This is it ... do the loop.
 			////////////////////////////////
 			for ( core::Size i = 1; i <= monte_carlo_cycles_ / rounds_; ++i ) {
+				core::pose::Pose pose_before;
+				bool const log_knot = knot_obs_enabled();
+				if ( log_knot ) pose_before = pose;
 				rna_denovo_master_mover_->apply( pose, i );
+				if ( log_knot ) {
+					log_moved_residues( pose_before, pose, r, i, rna_denovo_master_mover_->move_type() );
+				}
 				if ( rna_denovo_master_mover_->success() ) monte_carlo.boltzmann( pose, rna_denovo_master_mover_->move_type() );
 				outputter_->output_running_info( r, i, pose, working_denovo_scorefxn_ );
 			}
