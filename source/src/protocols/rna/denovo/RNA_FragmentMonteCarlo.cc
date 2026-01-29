@@ -145,20 +145,6 @@ std::ofstream & knot_eval_stream() {
 	return ofs;
 }
 
-bool knot_accept_log_enabled() {
-	return false;
-}
-
-std::ofstream & knot_accept_stream() {
-	static std::ofstream ofs;
-	static bool initialized = false;
-	if ( !initialized ) {
-		// Accept log disabled
-		initialized = true;
-	}
-	return ofs;
-}
-
 void write_knot_eval_log(
 	core::Size const round,
 	core::Size const iter,
