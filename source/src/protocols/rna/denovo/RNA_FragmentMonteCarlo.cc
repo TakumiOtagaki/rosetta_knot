@@ -137,6 +137,71 @@ core::Vector get_residue_point( core::pose::Pose const & pose, core::Size const 
 	return rsd.xyz( 1 );
 }
 
+std::vector< rna::ResidueCoord > build_residue_coords( core::pose::Pose const & pose ) {
+	std::vector< rna::ResidueCoord > coords;
+	coords.reserve( pose.size() );
+	for ( core::Size i = 1; i <= pose.size(); ++i ) {
+		auto const & rsd = pose.residue( i );
+		rna::ResidueCoord rc;
+		rc.res_index = static_cast<int>( i );
+
+		core::Vector p_xyz;
+		core::Vector c4_xyz;
+		if ( rsd.has( "P" ) ) {
+			p_xyz = rsd.xyz( "P" );
+		} else if ( rsd.has( " P  " ) ) {
+			p_xyz = rsd.xyz( " P  " );
+		} else if ( rsd.has( "C4'" ) ) {
+			p_xyz = rsd.xyz( "C4'" );
+		} else if ( rsd.has( "C1'" ) ) {
+			p_xyz = rsd.xyz( "C1'" );
+		} else {
+			p_xyz = rsd.xyz( 1 );
+		}
+
+		if ( rsd.has( "C4'" ) ) {
+			c4_xyz = rsd.xyz( "C4'" );
+		} else if ( rsd.has( "C1'" ) ) {
+			c4_xyz = rsd.xyz( "C1'" );
+		} else if ( rsd.has( "P" ) ) {
+			c4_xyz = rsd.xyz( "P" );
+		} else if ( rsd.has( " P  " ) ) {
+			c4_xyz = rsd.xyz( " P  " );
+		} else {
+			c4_xyz = rsd.xyz( 1 );
+		}
+
+		rc.atoms.push_back( { p_xyz.x(), p_xyz.y(), p_xyz.z() } );
+		rc.atoms.push_back( { c4_xyz.x(), c4_xyz.y(), c4_xyz.z() } );
+		coords.push_back( std::move( rc ) );
+	}
+	return coords;
+}
+
+std::vector< std::pair< int, int > > build_base_pairs_main_layer(
+	core::import_pose::RNA_BasePairHandlerCOP const & handler
+) {
+	std::vector< rna::BasePair > pairs;
+	if ( handler == nullptr ) return {};
+	core::pose::rna::RNA_BasePairList const bp_list = handler->rna_pairing_list();
+	pairs.reserve( bp_list.size() );
+	for ( auto const & bp : bp_list ) {
+		if ( bp.res1() == 0 || bp.res2() == 0 ) continue;
+		rna::BasePair out;
+		out.i = static_cast<int>( bp.res1() );
+		out.j = static_cast<int>( bp.res2() );
+		out.bp_type = rna::BasePair::Type::kUnclassified;
+		pairs.push_back( out );
+	}
+	std::vector< rna::BasePair > main_layer = rna::ExtractMainLayer( pairs );
+	std::vector< std::pair< int, int > > result;
+	result.reserve( main_layer.size() );
+	for ( auto const & bp : main_layer ) {
+		result.emplace_back( bp.i, bp.j );
+	}
+	return result;
+}
+
 // Log moved residues between two poses
 void log_moved_residues(
 	core::pose::Pose const & before,
@@ -214,6 +279,11 @@ RNA_FragmentMonteCarlo::initialize( pose::Pose & pose ) {
 	initialize_libraries( pose );
 	initialize_movers( pose ); // need the pose here for the RNP high res mover - Kalli
 	initialize_score_functions();
+
+	if ( !knot_base_pairs_initialized_ ) {
+		knot_base_pairs_ = build_base_pairs_main_layer( rna_base_pair_handler_ );
+		knot_base_pairs_initialized_ = true;
+	}
 }
 
 ////////////////////////////////////////////////////////////////////////////
@@ -240,6 +310,19 @@ RNA_FragmentMonteCarlo::apply( pose::Pose & pose ){
 	if ( options_->filter_lores_base_pairs() || options_->filter_chain_closure() )  max_tries = 10;
 
 	vector1< core::Size > moving_res_list; // used for alignment
+	std::vector< rna::Loop > knot_loops;
+	if ( !knot_base_pairs_.empty() ) {
+		std::vector< rna::BasePair > knot_pairs;
+		knot_pairs.reserve( knot_base_pairs_.size() );
+		for ( auto const & bp : knot_base_pairs_ ) {
+			rna::BasePair out;
+			out.i = bp.first;
+			out.j = bp.second;
+			out.bp_type = rna::BasePair::Type::kUnclassified;
+			knot_pairs.push_back( out );
+		}
+		knot_loops = rna::BuildLoops( knot_pairs, static_cast<int>( pose.size() ) );
+	}
 
 	for ( core::Size ntries = 1; ntries <= max_tries; ++ntries ) {
 
