@@ -340,3 +340,6 @@
 [submodule "database/protocol_data/tensorflow_graphs/tensorflow_graph_repo_submodule"]
 	path = database/protocol_data/tensorflow_graphs/tensorflow_graph_repo_submodule
 	url = ../../RosettaCommons/tensorflow_graphs.git
+[submodule "RNAknotDetector"]
+	path = RNAknotDetector
+	url = git@github.com:TakumiOtagaki/RNAknotDetector.git
