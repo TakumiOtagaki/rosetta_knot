@@ -101,7 +101,6 @@ std::vector< std::pair< int, int > > build_base_pairs_main_layer(
 struct KnotEnvConfig {
 	std::string obs_log;
 	std::string eval_log;
-	double obs_eps = 1e-3;
 	double penalty_weight = 0.0;
 	bool obs_enabled = false;
 	bool eval_log_enabled = false;
@@ -119,8 +118,6 @@ KnotEnvConfig init_knot_env() {
 		cfg.eval_log = eval;
 		cfg.eval_log_enabled = true;
 	}
-	const char *eps = std::getenv( "ROSETTA_KNOT_OBS_EPS" );
-	if ( eps != nullptr && eps[0] != '\0' ) cfg.obs_eps = std::atof( eps );
 	const char *w = std::getenv( "ROSETTA_KNOT_PENALTY_WEIGHT" );
 	if ( w != nullptr && w[0] != '\0' ) cfg.penalty_weight = std::atof( w );
 	return cfg;
@@ -134,11 +131,6 @@ KnotEnvConfig const & knot_env() {
 // Environment variable based control of knot observation logging
 bool knot_obs_enabled() {
 	return knot_env().obs_enabled;
-}
-
-// Epsilon for determining whether a residue has moved
-double knot_obs_eps() {
-	return knot_env().obs_eps;
 }
 
 double knot_penalty_weight() {
@@ -386,7 +378,7 @@ void log_moved_residues(
 	std::ofstream & ofs = knot_obs_stream();
 	if ( !ofs.good() ) return;
 
-	double const eps = knot_obs_eps();
+	double const eps = 1e-3;
 	utility::vector1< core::Size > moved;
 	moved.reserve( after.size() );
 	for ( core::Size i = 1; i <= after.size(); ++i ) {
