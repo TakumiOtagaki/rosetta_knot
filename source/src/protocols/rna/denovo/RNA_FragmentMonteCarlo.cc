@@ -94,6 +94,10 @@ namespace denovo {
 
 namespace {
 
+std::vector< std::pair< int, int > > build_base_pairs_main_layer(
+	core::import_pose::RNA_BasePairHandlerCOP const & handler
+);
+
 struct KnotEnvConfig {
 	std::string obs_log;
 	std::string eval_log;
