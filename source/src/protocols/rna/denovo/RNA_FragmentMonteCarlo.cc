@@ -126,7 +126,7 @@ double knot_penalty_weight() {
 }
 
 bool knot_eval_log_enabled() {
-	return knot_env().eval_log_enabled;
+	return knot_env().eval_log_enabled && knot_penalty_weight() != 0.0;
 }
 
 std::ofstream & knot_eval_stream() {
@@ -271,6 +271,7 @@ struct KnotContext {
 		k_last = 0;
 		k_last_initialized = false;
 		if ( loops.empty() ) return;
+		if ( knot_penalty_weight() == 0.0 ) return;
 		k_last = evaluate_knot_K( pose, loops );
 		k_last_initialized = true;
 	}
@@ -280,6 +281,7 @@ struct KnotContext {
 	}
 
 	int evaluate_k( core::pose::Pose const & pose ) const {
+		if ( knot_penalty_weight() == 0.0 ) return 0;
 		return evaluate_knot_K( pose, loops );
 	}
 
@@ -545,7 +547,7 @@ RNA_FragmentMonteCarlo::apply( pose::Pose & pose ){
 				if ( rna_denovo_master_mover_->success() ) {
 					core::Real inner_score_delta_over_temperature = 0.0;
 					int knot_K = 0;
-					if ( !knot_ctx.loops.empty() ) {
+					if ( !knot_ctx.loops.empty() && knot_penalty_weight() != 0.0 ) {
 						knot_K = knot_ctx.evaluate_k( pose );
 
 						int const delta_k = knot_delta_k( knot_K, knot_K_before );
