@@ -54,6 +54,7 @@
 #include <ctime>
 #include <cstdlib>
 #include <fstream>
+#include <string>
 #include <vector>
 
 #include <core/pose/rna/BasePairStep.hh> // MANUAL IWYU
@@ -93,23 +94,58 @@ namespace denovo {
 
 namespace {
 
+struct KnotEnvConfig {
+	std::string obs_log;
+	std::string eval_log;
+	std::string accept_log;
+	double obs_eps = 1e-3;
+	double penalty_weight = 0.0;
+	bool obs_enabled = false;
+	bool eval_log_enabled = false;
+	bool accept_log_enabled = false;
+};
+
+KnotEnvConfig init_knot_env() {
+	KnotEnvConfig cfg;
+	const char *obs = std::getenv( "ROSETTA_KNOT_OBS_LOG" );
+	if ( obs != nullptr && obs[0] != '\0' ) {
+		cfg.obs_log = obs;
+		cfg.obs_enabled = true;
+	}
+	const char *eval = std::getenv( "ROSETTA_KNOT_EVAL_LOG" );
+	if ( eval != nullptr && eval[0] != '\0' ) {
+		cfg.eval_log = eval;
+		cfg.eval_log_enabled = true;
+	}
+	const char *acc = std::getenv( "ROSETTA_KNOT_ACCEPT_LOG" );
+	if ( acc != nullptr && acc[0] != '\0' ) {
+		cfg.accept_log = acc;
+		cfg.accept_log_enabled = true;
+	}
+	const char *eps = std::getenv( "ROSETTA_KNOT_OBS_EPS" );
+	if ( eps != nullptr && eps[0] != '\0' ) cfg.obs_eps = std::atof( eps );
+	const char *w = std::getenv( "ROSETTA_KNOT_PENALTY_WEIGHT" );
+	if ( w != nullptr && w[0] != '\0' ) cfg.penalty_weight = std::atof( w );
+	return cfg;
+}
+
+KnotEnvConfig const & knot_env() {
+	static KnotEnvConfig cfg = init_knot_env();
+	return cfg;
+}
+
 // Environment variable based control of knot observation logging
 bool knot_obs_enabled() {
-	const char *path = std::getenv( "ROSETTA_KNOT_OBS_LOG" );
-	return ( path != nullptr && path[0] != '\0' );
+	return knot_env().obs_enabled;
 }
 
 // Epsilon for determining whether a residue has moved
 double knot_obs_eps() {
-	const char *eps = std::getenv( "ROSETTA_KNOT_OBS_EPS" );
-	if ( eps == nullptr || eps[0] == '\0' ) return 1e-3;
-	return std::atof( eps );
+	return knot_env().obs_eps;
 }
 
 double knot_penalty_weight() {
-	const char *w = std::getenv( "ROSETTA_KNOT_PENALTY_WEIGHT" );
-	if ( w == nullptr || w[0] == '\0' ) return 0.0;
-	return std::atof( w );
+	return knot_env().penalty_weight;
 }
 
 // Stream for knot observation logging
@@ -117,8 +153,8 @@ std::ofstream & knot_obs_stream() {
 	static std::ofstream ofs;
 	static bool initialized = false;
 	if ( !initialized ) {
-		const char *path = std::getenv( "ROSETTA_KNOT_OBS_LOG" );
-		if ( path != nullptr && path[0] != '\0' ) {
+		std::string const & path = knot_env().obs_log;
+		if ( !path.empty() ) {
 			ofs.open( path, std::ios::out | std::ios::app );
 			if ( ofs.good() ) {
 				ofs << "round,iter,move_type,count,residues\n";
@@ -130,16 +166,15 @@ std::ofstream & knot_obs_stream() {
 }
 
 bool knot_eval_log_enabled() {
-	const char *path = std::getenv( "ROSETTA_KNOT_EVAL_LOG" );
-	return ( path != nullptr && path[0] != '\0' );
+	return knot_env().eval_log_enabled;
 }
 
 std::ofstream & knot_eval_stream() {
 	static std::ofstream ofs;
 	static bool initialized = false;
 	if ( !initialized ) {
-		const char *path = std::getenv( "ROSETTA_KNOT_EVAL_LOG" );
-		if ( path != nullptr && path[0] != '\0' ) {
+		std::string const & path = knot_env().eval_log;
+		if ( !path.empty() ) {
 			ofs.open( path, std::ios::out | std::ios::app );
 			if ( ofs.good() ) {
 				ofs << "round,iter,move_type,K,penalty,accept\n";
@@ -151,16 +186,15 @@ std::ofstream & knot_eval_stream() {
 }
 
 bool knot_accept_log_enabled() {
-	const char *path = std::getenv( "ROSETTA_KNOT_ACCEPT_LOG" );
-	return ( path != nullptr && path[0] != '\0' );
+	return knot_env().accept_log_enabled;
 }
 
 std::ofstream & knot_accept_stream() {
 	static std::ofstream ofs;
 	static bool initialized = false;
 	if ( !initialized ) {
-		const char *path = std::getenv( "ROSETTA_KNOT_ACCEPT_LOG" );
-		if ( path != nullptr && path[0] != '\0' ) {
+		std::string const & path = knot_env().accept_log;
+		if ( !path.empty() ) {
 			ofs.open( path, std::ios::out | std::ios::app );
 			if ( ofs.good() ) {
 				ofs << "round,iter,move_type,K\n";
