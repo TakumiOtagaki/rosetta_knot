@@ -220,6 +220,21 @@ std::vector< ::rna::ResidueCoord > build_residue_coords( core::pose::Pose const 
 	return coords;
 }
 
+int evaluate_knot_K( core::pose::Pose const & pose, std::vector< ::rna::Loop > const & knot_loops ) {
+	if ( knot_loops.empty() ) return 0;
+	std::vector< ::rna::ResidueCoord > coords = build_residue_coords( pose );
+	::rna::SurfaceBuildOptions surf_opts;
+	surf_opts.atom_index = 1; // C4'
+	std::vector< ::rna::Surface > surfaces = ::rna::BuildSurfaces( coords, knot_loops, surf_opts );
+
+	::rna::EvaluateOptions eval_opts;
+	eval_opts.polyline_mode = ::rna::EvaluateOptions::PolylineMode::kPC4Alternating;
+	eval_opts.atom_index_p = 0;
+	eval_opts.atom_index_c4 = 1;
+	::rna::Result result = ::rna::EvaluateEntanglement( coords, surfaces, eval_opts );
+	return result.K;
+}
+
 std::vector< std::pair< int, int > > build_base_pairs_main_layer(
 	core::import_pose::RNA_BasePairHandlerCOP const & handler
 ) {
@@ -474,18 +489,7 @@ RNA_FragmentMonteCarlo::apply( pose::Pose & pose ){
 		knot_K_last_ = 0;
 		knot_K_last_initialized_ = false;
 		if ( !knot_loops.empty() ) {
-			std::vector< ::rna::ResidueCoord > coords_init = build_residue_coords( pose );
-			::rna::SurfaceBuildOptions surf_opts_init;
-			surf_opts_init.atom_index = 1; // C4'
-			std::vector< ::rna::Surface > surfaces_init =
-				::rna::BuildSurfaces( coords_init, knot_loops, surf_opts_init );
-			::rna::EvaluateOptions eval_opts_init;
-			eval_opts_init.polyline_mode = ::rna::EvaluateOptions::PolylineMode::kPC4Alternating;
-			eval_opts_init.atom_index_p = 0;
-			eval_opts_init.atom_index_c4 = 1;
-			::rna::Result result_init =
-				::rna::EvaluateEntanglement( coords_init, surfaces_init, eval_opts_init );
-			knot_K_last_ = result_init.K;
+			knot_K_last_ = evaluate_knot_K( pose, knot_loops );
 			knot_K_last_initialized_ = true;
 		}
 
@@ -540,17 +544,7 @@ RNA_FragmentMonteCarlo::apply( pose::Pose & pose ){
 					core::Real inner_score_delta_over_temperature = 0.0;
 					int knot_K = 0;
 					if ( !knot_loops.empty() ) {
-						std::vector< ::rna::ResidueCoord > coords = build_residue_coords( pose );
-						::rna::SurfaceBuildOptions surf_opts;
-						surf_opts.atom_index = 1; // C4'
-						std::vector< ::rna::Surface > surfaces = ::rna::BuildSurfaces( coords, knot_loops, surf_opts );
-
-						::rna::EvaluateOptions eval_opts;
-						eval_opts.polyline_mode = ::rna::EvaluateOptions::PolylineMode::kPC4Alternating;
-						eval_opts.atom_index_p = 0;
-						eval_opts.atom_index_c4 = 1;
-						::rna::Result result = ::rna::EvaluateEntanglement( coords, surfaces, eval_opts );
-						knot_K = result.K;
+						knot_K = evaluate_knot_K( pose, knot_loops );
 
 						double const weight = knot_penalty_weight();
 						if ( weight != 0.0 ) {
