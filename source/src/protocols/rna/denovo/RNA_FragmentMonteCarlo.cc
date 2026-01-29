@@ -106,6 +106,12 @@ double knot_obs_eps() {
 	return std::atof( eps );
 }
 
+double knot_penalty_weight() {
+	const char *w = std::getenv( "ROSETTA_KNOT_PENALTY_WEIGHT" );
+	if ( w == nullptr || w[0] == '\0' ) return 0.0;
+	return std::atof( w );
+}
+
 // Stream for knot observation logging
 std::ofstream & knot_obs_stream() {
 	static std::ofstream ofs;

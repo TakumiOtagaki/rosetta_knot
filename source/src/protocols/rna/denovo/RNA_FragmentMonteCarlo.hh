@@ -253,6 +253,10 @@ private:
 
 	output::RNA_FragmentMonteCarloOutputterOP outputter_;
 
+	// Cached base pairs for knot evaluation (main layer only).
+	std::vector< std::pair< int, int > > knot_base_pairs_;
+	bool knot_base_pairs_initialized_ = false;
+
 };
 
 } //denovo
