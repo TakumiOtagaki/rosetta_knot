@@ -171,6 +171,38 @@ std::ofstream & knot_accept_stream() {
 	return ofs;
 }
 
+void write_knot_eval_log(
+	core::Size const round,
+	core::Size const iter,
+	std::string const & move_type,
+	int const knot_K,
+	int const delta_k,
+	bool const accepted
+) {
+	if ( !knot_eval_log_enabled() ) return;
+	std::ofstream & eofs = knot_eval_stream();
+	if ( !eofs.good() ) return;
+	if ( delta_k <= 0 ) return;
+	double const weight = knot_penalty_weight();
+	double const penalty = weight * static_cast<double>( delta_k );
+	eofs << round << "," << iter << "," << move_type
+		<< "," << knot_K << "," << penalty << "," << ( accepted ? 1 : 0 ) << "\n";
+}
+
+void write_knot_accept_log(
+	core::Size const round,
+	core::Size const iter,
+	std::string const & move_type,
+	int const knot_K,
+	bool const accepted
+) {
+	if ( !accepted ) return;
+	if ( !knot_accept_log_enabled() ) return;
+	std::ofstream & aofs = knot_accept_stream();
+	if ( !aofs.good() ) return;
+	aofs << round << "," << iter << "," << move_type << "," << knot_K << "\n";
+}
+
 // Get a representative point for a residue (for movement comparison)
 core::Vector get_residue_point( core::pose::Pose const & pose, core::Size const i ) {
 	auto const & rsd = pose.residue( i );
@@ -558,26 +590,9 @@ RNA_FragmentMonteCarlo::apply( pose::Pose & pose ){
 						1.0, // 補正なし
 						inner_score_delta_over_temperature // 結び目ペナルティ補正項
 					);
-					if ( knot_eval_log_enabled() ) {
-						std::ofstream & eofs = knot_eval_stream();
-						if ( eofs.good() ) {
-							double const weight = knot_penalty_weight();
-							int const delta_k = knot_K - knot_K_before;
-							double const penalty = weight * static_cast<double>( delta_k );
-							if ( delta_k > 0 ) {
-								eofs << r << "," << i << "," << rna_denovo_master_mover_->move_type()
-									<< "," << knot_K << "," << penalty << "," << ( accepted ? 1 : 0 ) << "\n";
-							}
-						}
-					}
-
-					if ( accepted && knot_accept_log_enabled() ) {
-						std::ofstream & aofs = knot_accept_stream();
-						if ( aofs.good() ) {
-							aofs << r << "," << i << "," << rna_denovo_master_mover_->move_type()
-								<< "," << knot_K << "\n";
-						}
-					}
+					int const delta_k = knot_K - knot_K_before;
+					write_knot_eval_log( r, i, rna_denovo_master_mover_->move_type(), knot_K, delta_k, accepted );
+					write_knot_accept_log( r, i, rna_denovo_master_mover_->move_type(), knot_K, accepted );
 
 					if ( accepted ) {
 						knot_K_last_ = knot_K;
