@@ -256,6 +256,8 @@ private:
 	// Cached base pairs for knot evaluation (main layer only).
 	std::vector< std::pair< int, int > > knot_base_pairs_;
 	bool knot_base_pairs_initialized_ = false;
+	int knot_K_last_ = 0;
+	bool knot_K_last_initialized_ = false;
 
 };
 
