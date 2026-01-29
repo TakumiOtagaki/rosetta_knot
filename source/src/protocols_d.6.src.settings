@@ -37,6 +37,13 @@ sources = {
     "protocols/rna/denovo/output": [
         "RNA_FragmentMonteCarloOutputter",
     ],
+    "protocols/rna/denovo/knot": [
+        "entanglement_bridge",
+        "geometry2d_bridge",
+        "geometry3d_bridge",
+        "pseudoknot_decomposition_bridge",
+        "surface_builder_bridge",
+    ],
     "protocols/rna/movers": [
         "ErraserMinimizerMover",
         "ERRASER2Protocol",

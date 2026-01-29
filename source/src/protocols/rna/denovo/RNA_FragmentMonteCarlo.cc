@@ -129,6 +129,27 @@ std::ofstream & knot_obs_stream() {
 	return ofs;
 }
 
+bool knot_eval_log_enabled() {
+	const char *path = std::getenv( "ROSETTA_KNOT_EVAL_LOG" );
+	return ( path != nullptr && path[0] != '\0' );
+}
+
+std::ofstream & knot_eval_stream() {
+	static std::ofstream ofs;
+	static bool initialized = false;
+	if ( !initialized ) {
+		const char *path = std::getenv( "ROSETTA_KNOT_EVAL_LOG" );
+		if ( path != nullptr && path[0] != '\0' ) {
+			ofs.open( path, std::ios::out | std::ios::app );
+			if ( ofs.good() ) {
+				ofs << "round,iter,move_type,K,penalty,accept\n";
+			}
+		}
+		initialized = true;
+	}
+	return ofs;
+}
+
 // Get a representative point for a residue (for movement comparison)
 core::Vector get_residue_point( core::pose::Pose const & pose, core::Size const i ) {
 	auto const & rsd = pose.residue( i );
@@ -137,12 +158,12 @@ core::Vector get_residue_point( core::pose::Pose const & pose, core::Size const 
 	return rsd.xyz( 1 );
 }
 
-std::vector< rna::ResidueCoord > build_residue_coords( core::pose::Pose const & pose ) {
-	std::vector< rna::ResidueCoord > coords;
+std::vector< ::rna::ResidueCoord > build_residue_coords( core::pose::Pose const & pose ) {
+	std::vector< ::rna::ResidueCoord > coords;
 	coords.reserve( pose.size() );
 	for ( core::Size i = 1; i <= pose.size(); ++i ) {
 		auto const & rsd = pose.residue( i );
-		rna::ResidueCoord rc;
+		::rna::ResidueCoord rc;
 		rc.res_index = static_cast<int>( i );
 
 		core::Vector p_xyz;
@@ -181,19 +202,19 @@ std::vector< rna::ResidueCoord > build_residue_coords( core::pose::Pose const & 
 std::vector< std::pair< int, int > > build_base_pairs_main_layer(
 	core::import_pose::RNA_BasePairHandlerCOP const & handler
 ) {
-	std::vector< rna::BasePair > pairs;
+	std::vector< ::rna::BasePair > pairs;
 	if ( handler == nullptr ) return {};
 	core::pose::rna::RNA_BasePairList const bp_list = handler->rna_pairing_list();
 	pairs.reserve( bp_list.size() );
 	for ( auto const & bp : bp_list ) {
 		if ( bp.res1() == 0 || bp.res2() == 0 ) continue;
-		rna::BasePair out;
+		::rna::BasePair out;
 		out.i = static_cast<int>( bp.res1() );
 		out.j = static_cast<int>( bp.res2() );
-		out.bp_type = rna::BasePair::Type::kUnclassified;
+		out.bp_type = ::rna::BasePair::Type::kUnclassified;
 		pairs.push_back( out );
 	}
-	std::vector< rna::BasePair > main_layer = rna::ExtractMainLayer( pairs );
+	std::vector< ::rna::BasePair > main_layer = ::rna::ExtractMainLayer( pairs );
 	std::vector< std::pair< int, int > > result;
 	result.reserve( main_layer.size() );
 	for ( auto const & bp : main_layer ) {
@@ -310,18 +331,18 @@ RNA_FragmentMonteCarlo::apply( pose::Pose & pose ){
 	if ( options_->filter_lores_base_pairs() || options_->filter_chain_closure() )  max_tries = 10;
 
 	vector1< core::Size > moving_res_list; // used for alignment
-	std::vector< rna::Loop > knot_loops;
+	std::vector< ::rna::Loop > knot_loops;
 	if ( !knot_base_pairs_.empty() ) {
-		std::vector< rna::BasePair > knot_pairs;
+		std::vector< ::rna::BasePair > knot_pairs;
 		knot_pairs.reserve( knot_base_pairs_.size() );
 		for ( auto const & bp : knot_base_pairs_ ) {
-			rna::BasePair out;
+			::rna::BasePair out;
 			out.i = bp.first;
 			out.j = bp.second;
-			out.bp_type = rna::BasePair::Type::kUnclassified;
+			out.bp_type = ::rna::BasePair::Type::kUnclassified;
 			knot_pairs.push_back( out );
 		}
-		knot_loops = rna::BuildLoops( knot_pairs, static_cast<int>( pose.size() ) );
+		knot_loops = ::rna::BuildLoops( knot_pairs, static_cast<int>( pose.size() ) );
 	}
 
 	for ( core::Size ntries = 1; ntries <= max_tries; ++ntries ) {
@@ -476,17 +497,19 @@ RNA_FragmentMonteCarlo::apply( pose::Pose & pose ){
 
 				if ( rna_denovo_master_mover_->success() ) {
 					core::Real inner_score_delta_over_temperature = 0.0;
+					int knot_K = 0;
 					if ( !knot_loops.empty() ) {
-						std::vector< rna::ResidueCoord > coords = build_residue_coords( pose );
-						rna::SurfaceBuildOptions surf_opts;
+						std::vector< ::rna::ResidueCoord > coords = build_residue_coords( pose );
+						::rna::SurfaceBuildOptions surf_opts;
 						surf_opts.atom_index = 1; // C4'
-						std::vector< rna::Surface > surfaces = rna::BuildSurfaces( coords, knot_loops, surf_opts );
+						std::vector< ::rna::Surface > surfaces = ::rna::BuildSurfaces( coords, knot_loops, surf_opts );
 
-						rna::EvaluateOptions eval_opts;
-						eval_opts.polyline_mode = rna::EvaluateOptions::PolylineMode::kPC4Alternating;
+						::rna::EvaluateOptions eval_opts;
+						eval_opts.polyline_mode = ::rna::EvaluateOptions::PolylineMode::kPC4Alternating;
 						eval_opts.atom_index_p = 0;
 						eval_opts.atom_index_c4 = 1;
-						rna::Result result = rna::EvaluateEntanglement( coords, surfaces, eval_opts );
+						::rna::Result result = ::rna::EvaluateEntanglement( coords, surfaces, eval_opts );
+						knot_K = result.K;
 
 						double const weight = knot_penalty_weight();
 						if ( weight != 0.0 ) {
@@ -494,12 +517,21 @@ RNA_FragmentMonteCarlo::apply( pose::Pose & pose ){
 								static_cast< core::Real >( weight * result.K / monte_carlo.temperature() );
 						}
 					}
-					monte_carlo.boltzmann(
+					bool const accepted = monte_carlo.boltzmann(
 						pose,
 						rna_denovo_master_mover_->move_type(),
 						1.0, // 補正なし
 						inner_score_delta_over_temperature // 結び目ペナルティ補正項
 					);
+					if ( knot_eval_log_enabled() ) {
+						std::ofstream & eofs = knot_eval_stream();
+						if ( eofs.good() ) {
+							double const weight = knot_penalty_weight();
+							double const penalty = weight * static_cast<double>( knot_K );
+							eofs << r << "," << i << "," << rna_denovo_master_mover_->move_type()
+								<< "," << knot_K << "," << penalty << "," << ( accepted ? 1 : 0 ) << "\n";
+						}
+					}
 				}
 				outputter_->output_running_info( r, i, pose, working_denovo_scorefxn_ );
 			}
