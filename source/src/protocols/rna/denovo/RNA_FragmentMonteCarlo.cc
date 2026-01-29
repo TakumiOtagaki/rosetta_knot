@@ -311,6 +311,54 @@ int evaluate_knot_K( core::pose::Pose const & pose, std::vector< ::rna::Loop > c
 	return result.K;
 }
 
+struct KnotContext {
+	std::vector< std::pair< int, int > > base_pairs;
+	std::vector< ::rna::Loop > loops;
+	int k_last = 0;
+	bool k_last_initialized = false;
+
+	void initialize_base_pairs( core::import_pose::RNA_BasePairHandlerCOP const & handler ) {
+		if ( !base_pairs.empty() ) return;
+		base_pairs = build_base_pairs_main_layer( handler );
+	}
+
+	void build_loops( int n_res ) {
+		if ( base_pairs.empty() ) return;
+		std::vector< ::rna::BasePair > knot_pairs;
+		knot_pairs.reserve( base_pairs.size() );
+		for ( auto const & bp : base_pairs ) {
+			::rna::BasePair out;
+			out.i = bp.first;
+			out.j = bp.second;
+			out.bp_type = ::rna::BasePair::Type::kUnclassified;
+			knot_pairs.push_back( out );
+		}
+		loops = ::rna::BuildLoops( knot_pairs, n_res );
+	}
+
+	void initialize_k_last( core::pose::Pose const & pose ) {
+		k_last = 0;
+		k_last_initialized = false;
+		if ( loops.empty() ) return;
+		k_last = evaluate_knot_K( pose, loops );
+		k_last_initialized = true;
+	}
+
+	int k_before() const {
+		return k_last_initialized ? k_last : 0;
+	}
+
+	int evaluate_k( core::pose::Pose const & pose ) const {
+		return evaluate_knot_K( pose, loops );
+	}
+
+	void update_on_accept( int const k_after, bool const accepted ) {
+		if ( !accepted ) return;
+		k_last = k_after;
+		k_last_initialized = true;
+	}
+};
+
 std::vector< std::pair< int, int > > build_base_pairs_main_layer(
 	core::import_pose::RNA_BasePairHandlerCOP const & handler
 ) {
@@ -443,19 +491,12 @@ RNA_FragmentMonteCarlo::apply( pose::Pose & pose ){
 	if ( options_->filter_lores_base_pairs() || options_->filter_chain_closure() )  max_tries = 10;
 
 	vector1< core::Size > moving_res_list; // used for alignment
-	std::vector< ::rna::Loop > knot_loops;
-	if ( !knot_base_pairs_.empty() ) {
-		std::vector< ::rna::BasePair > knot_pairs;
-		knot_pairs.reserve( knot_base_pairs_.size() );
-		for ( auto const & bp : knot_base_pairs_ ) {
-			::rna::BasePair out;
-			out.i = bp.first;
-			out.j = bp.second;
-			out.bp_type = ::rna::BasePair::Type::kUnclassified;
-			knot_pairs.push_back( out );
-		}
-		knot_loops = ::rna::BuildLoops( knot_pairs, static_cast<int>( pose.size() ) );
+	KnotContext knot_ctx;
+	if ( knot_base_pairs_initialized_ ) {
+		knot_ctx.base_pairs = knot_base_pairs_;
 	}
+	knot_ctx.initialize_base_pairs( rna_base_pair_handler_ );
+	knot_ctx.build_loops( static_cast<int>( pose.size() ) );
 
 	for ( core::Size ntries = 1; ntries <= max_tries; ++ntries ) {
 
@@ -562,12 +603,7 @@ RNA_FragmentMonteCarlo::apply( pose::Pose & pose ){
 
 		if ( options_->verbose() ) TR << "Beginning main loop... " << std::endl;
 
-		knot_K_last_ = 0;
-		knot_K_last_initialized_ = false;
-		if ( !knot_loops.empty() ) {
-			knot_K_last_ = evaluate_knot_K( pose, knot_loops );
-			knot_K_last_initialized_ = true;
-		}
+		knot_ctx.initialize_k_last( pose );
 
 		bool found_solution( true );
 		for ( core::Size r = 1; r <= rounds_; r++ ) {
@@ -606,7 +642,7 @@ RNA_FragmentMonteCarlo::apply( pose::Pose & pose ){
 				if ( log_knot ) pose_before = pose;
 				// 追加部分ここまで
 
-				int knot_K_before = knot_K_last_initialized_ ? knot_K_last_ : 0;
+				int knot_K_before = knot_ctx.k_before();
 
 				rna_denovo_master_mover_->apply( pose, i );
 
@@ -619,8 +655,8 @@ RNA_FragmentMonteCarlo::apply( pose::Pose & pose ){
 				if ( rna_denovo_master_mover_->success() ) {
 					core::Real inner_score_delta_over_temperature = 0.0;
 					int knot_K = 0;
-					if ( !knot_loops.empty() ) {
-						knot_K = evaluate_knot_K( pose, knot_loops );
+					if ( !knot_ctx.loops.empty() ) {
+						knot_K = knot_ctx.evaluate_k( pose );
 
 						int const delta_k = knot_delta_k( knot_K, knot_K_before );
 						inner_score_delta_over_temperature =
@@ -636,10 +672,7 @@ RNA_FragmentMonteCarlo::apply( pose::Pose & pose ){
 					write_knot_eval_log( r, i, rna_denovo_master_mover_->move_type(), knot_K, delta_k, accepted );
 					write_knot_accept_log( r, i, rna_denovo_master_mover_->move_type(), knot_K, accepted );
 
-					if ( accepted ) {
-						knot_K_last_ = knot_K;
-						knot_K_last_initialized_ = true;
-					}
+					knot_ctx.update_on_accept( knot_K, accepted );
 				}
 				outputter_->output_running_info( r, i, pose, working_denovo_scorefxn_ );
 			}
