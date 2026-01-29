@@ -42,6 +42,8 @@
 #include <core/import_pose/import_pose.hh>
 #include <core/import_pose/options/RNA_FragmentMonteCarloOptions.hh>
 #include <core/scoring/ScoreFunctionFactory.hh>
+#include <core/pose/rna/BasePair.hh>
+#include "entanglement.h"
 
 #include <core/pose/copydofs/util.hh>
 #include <core/scoring/constraints/ConstraintSet.hh>
@@ -52,6 +54,7 @@
 #include <ctime>
 #include <cstdlib>
 #include <fstream>
+#include <vector>
 
 #include <core/pose/rna/BasePairStep.hh> // MANUAL IWYU
 #include <protocols/rna/denovo/output/RNA_FragmentMonteCarloOutputter.hh> // AUTO IWYU For RNA_FragmentMonteCarloOutputter

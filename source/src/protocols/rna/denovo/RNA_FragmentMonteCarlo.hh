@@ -37,6 +37,8 @@
 #include <core/types.hh>
 
 #include <map> // AUTO IWYU For map
+#include <utility> // AUTO IWYU For pair
+#include <vector> // AUTO IWYU For vector
 
 namespace protocols {
 namespace rna {
