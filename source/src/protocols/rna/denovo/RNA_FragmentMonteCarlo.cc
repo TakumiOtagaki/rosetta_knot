@@ -101,12 +101,10 @@ std::vector< std::pair< int, int > > build_base_pairs_main_layer(
 struct KnotEnvConfig {
 	std::string obs_log;
 	std::string eval_log;
-	std::string accept_log;
 	double obs_eps = 1e-3;
 	double penalty_weight = 0.0;
 	bool obs_enabled = false;
 	bool eval_log_enabled = false;
-	bool accept_log_enabled = false;
 };
 
 KnotEnvConfig init_knot_env() {
@@ -120,11 +118,6 @@ KnotEnvConfig init_knot_env() {
 	if ( eval != nullptr && eval[0] != '\0' ) {
 		cfg.eval_log = eval;
 		cfg.eval_log_enabled = true;
-	}
-	const char *acc = std::getenv( "ROSETTA_KNOT_ACCEPT_LOG" );
-	if ( acc != nullptr && acc[0] != '\0' ) {
-		cfg.accept_log = acc;
-		cfg.accept_log_enabled = true;
 	}
 	const char *eps = std::getenv( "ROSETTA_KNOT_OBS_EPS" );
 	if ( eps != nullptr && eps[0] != '\0' ) cfg.obs_eps = std::atof( eps );
@@ -190,20 +183,14 @@ std::ofstream & knot_eval_stream() {
 }
 
 bool knot_accept_log_enabled() {
-	return knot_env().accept_log_enabled;
+	return false;
 }
 
 std::ofstream & knot_accept_stream() {
 	static std::ofstream ofs;
 	static bool initialized = false;
 	if ( !initialized ) {
-		std::string const & path = knot_env().accept_log;
-		if ( !path.empty() ) {
-			ofs.open( path, std::ios::out | std::ios::app );
-			if ( ofs.good() ) {
-				ofs << "round,iter,move_type,K\n";
-			}
-		}
+		// Accept log disabled
 		initialized = true;
 	}
 	return ofs;
@@ -220,7 +207,6 @@ void write_knot_eval_log(
 	if ( !knot_eval_log_enabled() ) return;
 	std::ofstream & eofs = knot_eval_stream();
 	if ( !eofs.good() ) return;
-	if ( delta_k <= 0 ) return;
 	double const weight = knot_penalty_weight();
 	double const penalty = weight * static_cast<double>( delta_k );
 	eofs << round << "," << iter << "," << move_type
@@ -234,11 +220,11 @@ void write_knot_accept_log(
 	int const knot_K,
 	bool const accepted
 ) {
-	if ( !accepted ) return;
-	if ( !knot_accept_log_enabled() ) return;
-	std::ofstream & aofs = knot_accept_stream();
-	if ( !aofs.good() ) return;
-	aofs << round << "," << iter << "," << move_type << "," << knot_K << "\n";
+	(void)round;
+	(void)iter;
+	(void)move_type;
+	(void)knot_K;
+	(void)accepted;
 }
 
 int knot_delta_k( int const knot_K, int const knot_K_before ) {
