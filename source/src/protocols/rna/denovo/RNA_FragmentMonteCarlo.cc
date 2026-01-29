@@ -99,20 +99,13 @@ std::vector< std::pair< int, int > > build_base_pairs_main_layer(
 );
 
 struct KnotEnvConfig {
-	std::string obs_log;
 	std::string eval_log;
 	double penalty_weight = 0.0;
-	bool obs_enabled = false;
 	bool eval_log_enabled = false;
 };
 
 KnotEnvConfig init_knot_env() {
 	KnotEnvConfig cfg;
-	const char *obs = std::getenv( "ROSETTA_KNOT_OBS_LOG" );
-	if ( obs != nullptr && obs[0] != '\0' ) {
-		cfg.obs_log = obs;
-		cfg.obs_enabled = true;
-	}
 	const char *eval = std::getenv( "ROSETTA_KNOT_EVAL_LOG" );
 	if ( eval != nullptr && eval[0] != '\0' ) {
 		cfg.eval_log = eval;
@@ -128,30 +121,8 @@ KnotEnvConfig const & knot_env() {
 	return cfg;
 }
 
-// Environment variable based control of knot observation logging
-bool knot_obs_enabled() {
-	return knot_env().obs_enabled;
-}
-
 double knot_penalty_weight() {
 	return knot_env().penalty_weight;
-}
-
-// Stream for knot observation logging
-std::ofstream & knot_obs_stream() {
-	static std::ofstream ofs;
-	static bool initialized = false;
-	if ( !initialized ) {
-		std::string const & path = knot_env().obs_log;
-		if ( !path.empty() ) {
-			ofs.open( path, std::ios::out | std::ios::app );
-			if ( ofs.good() ) {
-				ofs << "round,iter,move_type,count,residues\n";
-			}
-		}
-		initialized = true;
-	}
-	return ofs;
 }
 
 bool knot_eval_log_enabled() {
@@ -227,14 +198,6 @@ core::Real knot_inner_score_delta_over_temperature(int const delta_k, core::Real
 	double const weight = knot_penalty_weight();
 	if ( weight == 0.0 || temperature <= 0.0 ) return 0.0;
 	return static_cast< core::Real >( weight * static_cast<double>( delta_k ) / temperature );
-}
-
-// Get a representative point for a residue (for movement comparison)
-core::Vector get_residue_point( core::pose::Pose const & pose, core::Size const i ) {
-	auto const & rsd = pose.residue( i );
-	if ( rsd.has( "C4'" ) ) return rsd.xyz( "C4'" );
-	if ( rsd.has( "C1'" ) ) return rsd.xyz( "C1'" );
-	return rsd.xyz( 1 );
 }
 
 std::vector< ::rna::ResidueCoord > build_residue_coords( core::pose::Pose const & pose ) {
@@ -363,35 +326,6 @@ std::vector< std::pair< int, int > > build_base_pairs_main_layer(
 		result.emplace_back( bp.i, bp.j );
 	}
 	return result;
-}
-
-// Log moved residues between two poses
-void log_moved_residues(
-	core::pose::Pose const & before,
-	core::pose::Pose const & after,
-	core::Size const round,
-	core::Size const iter,
-	std::string const & move_type
-) {
-	if ( !knot_obs_enabled() ) return;
-	if ( before.size() != after.size() ) return;
-	std::ofstream & ofs = knot_obs_stream();
-	if ( !ofs.good() ) return;
-
-	double const eps = 1e-3;
-	utility::vector1< core::Size > moved;
-	moved.reserve( after.size() );
-	for ( core::Size i = 1; i <= after.size(); ++i ) {
-		core::Vector const a = get_residue_point( before, i );
-		core::Vector const b = get_residue_point( after, i );
-		if ( ( a - b ).length() > eps ) moved.push_back( i );
-	}
-	ofs << round << "," << iter << "," << move_type << "," << moved.size() << ",";
-	for ( core::Size k = 1; k <= moved.size(); ++k ) {
-		if ( k > 1 ) ofs << " ";
-		ofs << moved[ k ];
-	}
-	ofs << "\n";
 }
 
 } // namespace
@@ -618,21 +552,9 @@ RNA_FragmentMonteCarlo::apply( pose::Pose & pose ){
 			// This is it ... do the loop.
 			////////////////////////////////
 			for ( core::Size i = 1; i <= monte_carlo_cycles_ / rounds_; ++i ) {
-				// 追加部分ここから
-				core::pose::Pose pose_before;
-				bool const log_knot = knot_obs_enabled();
-				if ( log_knot ) pose_before = pose;
-				// 追加部分ここまで
-
 				int knot_K_before = knot_ctx.k_before();
 
 				rna_denovo_master_mover_->apply( pose, i );
-
-				// 追加部分ここから
-				if ( log_knot ) {
-					log_moved_residues( pose_before, pose, r, i, rna_denovo_master_mover_->move_type() );
-				}
-				// 追加部分ここまで
 
 				if ( rna_denovo_master_mover_->success() ) {
 					core::Real inner_score_delta_over_temperature = 0.0;
