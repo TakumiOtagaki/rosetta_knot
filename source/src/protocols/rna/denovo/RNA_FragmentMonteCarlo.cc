@@ -237,6 +237,16 @@ void write_knot_accept_log(
 	aofs << round << "," << iter << "," << move_type << "," << knot_K << "\n";
 }
 
+int knot_delta_k( int const knot_K, int const knot_K_before ) {
+	return knot_K - knot_K_before;
+}
+
+core::Real knot_inner_score_delta_over_temperature(int const delta_k, core::Real const temperature) {
+	double const weight = knot_penalty_weight();
+	if ( weight == 0.0 || temperature <= 0.0 ) return 0.0;
+	return static_cast< core::Real >( weight * static_cast<double>( delta_k ) / temperature );
+}
+
 // Get a representative point for a residue (for movement comparison)
 core::Vector get_residue_point( core::pose::Pose const & pose, core::Size const i ) {
 	auto const & rsd = pose.residue( i );
@@ -612,11 +622,9 @@ RNA_FragmentMonteCarlo::apply( pose::Pose & pose ){
 					if ( !knot_loops.empty() ) {
 						knot_K = evaluate_knot_K( pose, knot_loops );
 
-						double const weight = knot_penalty_weight();
-						if ( weight != 0.0 ) {
-							inner_score_delta_over_temperature =
-								static_cast< core::Real >( weight * ( knot_K - knot_K_before ) / monte_carlo.temperature() );
-						}
+						int const delta_k = knot_delta_k( knot_K, knot_K_before );
+						inner_score_delta_over_temperature =
+							knot_inner_score_delta_over_temperature( delta_k, monte_carlo.temperature() );
 					}
 					bool const accepted = monte_carlo.boltzmann(
 						pose,
@@ -624,7 +632,7 @@ RNA_FragmentMonteCarlo::apply( pose::Pose & pose ){
 						1.0, // 補正なし
 						inner_score_delta_over_temperature // 結び目ペナルティ補正項
 					);
-					int const delta_k = knot_K - knot_K_before;
+					int const delta_k = knot_delta_k( knot_K, knot_K_before );
 					write_knot_eval_log( r, i, rna_denovo_master_mover_->move_type(), knot_K, delta_k, accepted );
 					write_knot_accept_log( r, i, rna_denovo_master_mover_->move_type(), knot_K, accepted );
 
