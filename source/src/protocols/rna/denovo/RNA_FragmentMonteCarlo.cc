@@ -368,13 +368,21 @@ RNA_FragmentMonteCarlo::apply( pose::Pose & pose ){
 			// This is it ... do the loop.
 			////////////////////////////////
 			for ( core::Size i = 1; i <= monte_carlo_cycles_ / rounds_; ++i ) {
+				// 追加部分ここから
 				core::pose::Pose pose_before;
 				bool const log_knot = knot_obs_enabled();
 				if ( log_knot ) pose_before = pose;
+				// 追加部分ここまで
+
 				rna_denovo_master_mover_->apply( pose, i );
+
+				// 追加部分ここから
 				if ( log_knot ) {
 					log_moved_residues( pose_before, pose, r, i, rna_denovo_master_mover_->move_type() );
 				}
+				// 追加部分ここまで
+
+				
 				if ( rna_denovo_master_mover_->success() ) monte_carlo.boltzmann( pose, rna_denovo_master_mover_->move_type() );
 				outputter_->output_running_info( r, i, pose, working_denovo_scorefxn_ );
 			}
