@@ -474,8 +474,33 @@ RNA_FragmentMonteCarlo::apply( pose::Pose & pose ){
 				}
 				// 追加部分ここまで
 
-				
-				if ( rna_denovo_master_mover_->success() ) monte_carlo.boltzmann( pose, rna_denovo_master_mover_->move_type() );
+				if ( rna_denovo_master_mover_->success() ) {
+					core::Real inner_score_delta_over_temperature = 0.0;
+					if ( !knot_loops.empty() ) {
+						std::vector< rna::ResidueCoord > coords = build_residue_coords( pose );
+						rna::SurfaceBuildOptions surf_opts;
+						surf_opts.atom_index = 1; // C4'
+						std::vector< rna::Surface > surfaces = rna::BuildSurfaces( coords, knot_loops, surf_opts );
+
+						rna::EvaluateOptions eval_opts;
+						eval_opts.polyline_mode = rna::EvaluateOptions::PolylineMode::kPC4Alternating;
+						eval_opts.atom_index_p = 0;
+						eval_opts.atom_index_c4 = 1;
+						rna::Result result = rna::EvaluateEntanglement( coords, surfaces, eval_opts );
+
+						double const weight = knot_penalty_weight();
+						if ( weight != 0.0 ) {
+							inner_score_delta_over_temperature =
+								static_cast< core::Real >( weight * result.K / monte_carlo.temperature() );
+						}
+					}
+					monte_carlo.boltzmann(
+						pose,
+						rna_denovo_master_mover_->move_type(),
+						1.0, // 補正なし
+						inner_score_delta_over_temperature // 結び目ペナルティ補正項
+					);
+				}
 				outputter_->output_running_info( r, i, pose, working_denovo_scorefxn_ );
 			}
 
