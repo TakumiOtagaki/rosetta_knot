@@ -44,11 +44,11 @@ export ROSETTA_KNOT_EVAL_LOG=/path/to/log.txt
 cd source
 
 # Build rna_denovo (FARFAR2)
-uv run scons.py -j 4 mode=release bin/rna_denovo
+python3 scons.py -j 4 mode=release bin/rna_denovo.macosclangrelease
 
 # Build silent-to-PDB converter
-uv run scons.py -j 4 mode=release bin/extract_pdbs
+uv run scons.py -j 4 mode=release bin/extract_pdbs.macosclangrelease
 
 # Build both together
-uv run scons.py -j 4 mode=release bin/rna_denovo bin/extract_pdbs
+uv run scons.py -j 4 mode=release bin/rna_denovo.macosclangrelease bin/extract_pdbs.macosclangrelease
 ```
