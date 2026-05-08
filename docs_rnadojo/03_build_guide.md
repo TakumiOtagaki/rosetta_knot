@@ -25,35 +25,15 @@ If the output is empty, the file still needs the fix. See the root repository no
 
 ## Selective Build (Recommended)
 
-### Build Only What You Need
-
-Instead of building the entire Rosetta package, you can build only the RNA-related tools you need.
-
-#### Option 1: Build rna_denovo only
+### Build Both Together (Recommended)
 ```bash
 cd /Users/ootagakitakumi/rosetta_knot/source
 
-uv run scons.py -j 4 mode=release bin/rna_denovo
-```
+# Linux + GCC
+uv run scons.py -j 4 mode=release bin/rna_denovo.linuxgccrelease bin/extract_pdbs.linuxgccrelease
 
-**Time**: ~10-20 minutes (depending on system)
-**Output**: `build/src/release/linux/5.14/64/x86/gcc/11/default/rna_denovo`
-
-#### Option 2: Build extract_pdbs only
-```bash
-cd /Users/ootagakitakumi/rosetta_knot/source
-
-uv run scons.py -j 4 mode=release bin/extract_pdbs
-```
-
-**Time**: ~5-10 minutes
-**Output**: Silent-to-PDB converter
-
-#### Option 3: Build both together (Recommended)
-```bash
-cd /Users/ootagakitakumi/rosetta_knot/source
-
-uv run scons.py -j 4 mode=release bin/rna_denovo bin/extract_pdbs
+# Linux + Clang
+uv run scons.py -j 4 mode=release bin/rna_denovo.linuxclangrelease bin/extract_pdbs.linuxclangrelease
 ```
 
 ---
